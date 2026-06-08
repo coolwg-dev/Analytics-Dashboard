@@ -1,7 +1,11 @@
 import requests
 import pandas as pd
+import logging
 from datetime import datetime
 from typing import Optional
+
+
+logger = logging.getLogger(__name__)
 
 
 def _to_epoch(dt):
@@ -26,6 +30,7 @@ def fetch_reddit_posts(query: str, after: Optional[str] = None, before: Optional
     if before:
         params["before"] = _to_epoch(before)
     try:
+        logger.info("requesting reddit posts query=%s after=%s before=%s size=%s", query, after, before, size)
         resp = requests.get(base, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json().get("data", [])
@@ -41,8 +46,10 @@ def fetch_reddit_posts(query: str, after: Optional[str] = None, before: Optional
         df = pd.DataFrame(rows)
         if not df.empty and "created_utc" in df.columns:
             df["created_utc"] = pd.to_datetime(df["created_utc"], unit="s")
+        logger.info("reddit request returned %d rows for query=%s", len(df), query)
         return df
     except Exception:
+        logger.exception("failed to fetch reddit posts for query=%s", query)
         return pd.DataFrame()
 
 
@@ -52,6 +59,7 @@ def fetch_newsapi_headlines(api_key: Optional[str], query: str, from_date: Optio
     If `api_key` is None or empty, returns an empty list.
     """
     if not api_key:
+        logger.info("newsapi skipped because no api key was provided")
         return []
     url = "https://newsapi.org/v2/everything"
     params = {"q": query, "pageSize": page_size, "apiKey": api_key}
@@ -60,7 +68,8 @@ def fetch_newsapi_headlines(api_key: Optional[str], query: str, from_date: Optio
     if to_date:
         params["to"] = to_date
     try:
-        r = requests.get(url, params=params, timeout=10)
+        logger.info("requesting newsapi headlines query=%s from=%s to=%s page_size=%s", query, from_date, to_date, page_size)
+        r = requests.get(url, params=params, timeout=1000)
         r.raise_for_status()
         data = r.json().get("articles", [])
         # normalize to simple dicts
@@ -73,6 +82,8 @@ def fetch_newsapi_headlines(api_key: Optional[str], query: str, from_date: Optio
                 "url": a.get("url"),
                 "source": a.get("source", {}).get("name"),
             })
+        logger.info("newsapi returned %d articles for query=%s", len(out), query)
         return out
     except Exception:
+        logger.exception("failed to fetch newsapi headlines for query=%s", query)
         return []

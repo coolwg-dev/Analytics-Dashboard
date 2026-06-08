@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import logging
 from datetime import date, timedelta
 
 from data_fetcher import fetch_price_data, fetch_news_headlines, compute_sentiment
@@ -13,6 +14,10 @@ from cache import get_cache, set_cache
 st.set_page_config(page_title="Investment Dashboard", layout="wide")
 
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+
 def _cache_key(*parts):
     return "::".join([str(p) for p in parts])
 
@@ -20,7 +25,9 @@ def _cache_key(*parts):
 def _fetch_with_cache(key, fetcher, ttl):
     cached = get_cache(key, ttl)
     if cached is not None:
+        logger.info("cache hit for %s", key)
         return cached
+    logger.info("cache miss for %s", key)
     val = fetcher()
     set_cache(key, val, ttl_seconds=ttl if ttl else 0)
     return val
@@ -39,13 +46,20 @@ def main():
         fetch = st.button("Fetch Data")
 
     if fetch and ticker:
+        status = st.empty()
         with st.spinner("Fetching price and external data..."):
+            status.info("Starting data fetch")
+            logger.info("fetch started ticker=%s start=%s end=%s", ticker, start.isoformat(), end.isoformat())
             # Price data (cached)
+            status.info("Fetching price data")
+            logger.info("calling fetch_price_data for %s", ticker)
             price_key = _cache_key('price', ticker, start, end)
             price_df = _fetch_with_cache(price_key, lambda: fetch_price_data(ticker, start.isoformat(), end.isoformat()), cache_ttl)
             price_df = clean_price_df(price_df) if isinstance(price_df, pd.DataFrame) else pd.DataFrame()
 
             # YFinance headlines + sentiment (cached)
+            status.info("Fetching YFinance headlines")
+            logger.info("calling fetch_news_headlines for %s", ticker)
             ynews_key = _cache_key('ynews', ticker)
             ynews = _fetch_with_cache(ynews_key, lambda: fetch_news_headlines(ticker), cache_ttl)
             ysent = compute_sentiment(ynews) if ynews else pd.DataFrame()
@@ -55,12 +69,19 @@ def main():
             news_key = _cache_key('newsapi', ticker, start, end)
             newsapi = []
             if newsapi_key_used:
+                status.info("Fetching NewsAPI articles")
+                logger.info("calling fetch_newsapi_headlines for %s", ticker)
                 newsapi = _fetch_with_cache(news_key, lambda: fetch_newsapi_headlines(newsapi_key_used, ticker, from_date=start.isoformat(), to_date=end.isoformat()), cache_ttl)
+                logger.info("NewsAPI returned %d articles", len(newsapi))
+            else:
+                logger.info("NewsAPI skipped because no key was provided")
 
             # Reddit (Pushshift) sentiment (optional)
             reddit_df = pd.DataFrame()
             reddit_sent_df = pd.DataFrame()
             if enable_reddit:
+                status.info("Fetching Reddit posts")
+                logger.info("calling fetch_reddit_posts for %s", ticker)
                 reddit_key = _cache_key('reddit', ticker, start, end)
                 reddit_df = _fetch_with_cache(reddit_key, lambda: fetch_reddit_posts(ticker, after=start.isoformat(), before=end.isoformat()), cache_ttl)
                 if not reddit_df.empty:
@@ -69,6 +90,9 @@ def main():
                     if not sent.empty:
                         reddit_sent_df = sent.copy()
                         reddit_sent_df['created_utc'] = reddit_df['created_utc'].reset_index(drop=True)
+
+            status.success("Fetch complete")
+            logger.info("fetch complete ticker=%s price_rows=%d ynews=%d newsapi=%d reddit_rows=%d", ticker, len(price_df), len(ynews), len(newsapi), len(reddit_df))
 
         # Price visuals
         if price_df.empty:

@@ -3,8 +3,8 @@ from pathlib import Path
 import time
 
 
-CACHE_DIR = Path('.cache')
-CACHE_DIR.mkdir(exist_ok=True)
+_BASE = Path(__file__).resolve().parent
+CACHE_DIR = _BASE / '.cache'
 
 
 def _key_to_path(key: str) -> Path:
@@ -13,6 +13,7 @@ def _key_to_path(key: str) -> Path:
 
 
 def set_cache(key: str, obj, ttl_seconds: int = 3600):
+    CACHE_DIR.mkdir(exist_ok=True)
     p = _key_to_path(key)
     payload = {'ts': int(time.time()), 'ttl': int(ttl_seconds), 'obj': obj}
     with p.open('wb') as f:
@@ -20,6 +21,7 @@ def set_cache(key: str, obj, ttl_seconds: int = 3600):
 
 
 def get_cache(key: str, ttl_seconds: int = None):
+    CACHE_DIR.mkdir(exist_ok=True)
     p = _key_to_path(key)
     if not p.exists():
         return None
